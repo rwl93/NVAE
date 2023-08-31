@@ -62,6 +62,7 @@ class Swish(nn.Module):
 
 class SyncBatchNormSwish(nn.Module):
     def __init__(self, Cout, eps=BN_EPS, momentum=0.05):
+        super().__init__()
         self.bn = nn.BatchNorm2d(Cout, eps=eps, momentum=momentum)
         self.swish = Swish()
 
