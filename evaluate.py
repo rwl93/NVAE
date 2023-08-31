@@ -12,12 +12,13 @@ import os
 import matplotlib.pyplot as plt
 from time import time
 
-from torch.multiprocessing import Process
+# from torch.multiprocessing import Process
 
 from model import AutoEncoder
 import utils
 import datasets
-from train import test, init_processes, test_vae_fid
+# from train import test, init_processes, test_vae_fid
+from train import test, test_vae_fid
 
 
 def set_bn(model, bn_eval_mode, num_samples=1, t=1.0, iter=100):
@@ -34,7 +35,8 @@ def set_bn(model, bn_eval_mode, num_samples=1, t=1.0, iter=100):
 
 def main(eval_args):
     # ensures that weight initializations are all the same
-    logging = utils.Logger(eval_args.local_rank, eval_args.save)
+    # logging = utils.Logger(eval_args.local_rank, eval_args.save)
+    logging = utils.Logger('__evalmain__.main', eval_args.save)
 
     # load a checkpoint
     logging.info('loading the model at:')
@@ -124,7 +126,8 @@ def main(eval_args):
                     plt.imshow(output_tiled)
                     plt.show()
                 else:
-                    file_path = os.path.join(eval_args.save, 'gpu_%d_samples_%d.npz' % (eval_args.local_rank, ind))
+                    # file_path = os.path.join(eval_args.save, 'gpu_%d_samples_%d.npz' % (eval_args.local_rank, ind))
+                    file_path = os.path.join(eval_args.save, 'samples_%d.npz' % (ind))
                     np.savez_compressed(file_path, samples=output_img.cpu().numpy())
                     logging.info('Saved at: {}'.format(file_path))
 
@@ -153,33 +156,35 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=0,
                         help='Batch size used during evaluation. If set to zero, training batch size is used.')
     # DDP.
-    parser.add_argument('--local_rank', type=int, default=0,
-                        help='rank of process')
-    parser.add_argument('--world_size', type=int, default=1,
-                        help='number of gpus')
+    # parser.add_argument('--local_rank', type=int, default=0,
+    #                     help='rank of process')
+    # parser.add_argument('--world_size', type=int, default=1,
+    #                     help='number of gpus')
     parser.add_argument('--seed', type=int, default=1,
                         help='seed used for initialization')
-    parser.add_argument('--master_address', type=str, default='127.0.0.1',
-                        help='address for master')
+    # parser.add_argument('--master_address', type=str, default='127.0.0.1',
+    #                     help='address for master')
 
     args = parser.parse_args()
     utils.create_exp_dir(args.save)
 
-    size = args.world_size
+    # size = args.world_size
 
-    if size > 1:
-        args.distributed = True
-        processes = []
-        for rank in range(size):
-            args.local_rank = rank
-            p = Process(target=init_processes, args=(rank, size, main, args))
-            p.start()
-            processes.append(p)
+    # if size > 1:
+        # args.distributed = True
+        # processes = []
+        # for rank in range(size):
+        #     args.local_rank = rank
+        #     p = Process(target=init_processes, args=(rank, size, main, args))
+        #     p.start()
+        #     processes.append(p)
 
-        for p in processes:
-            p.join()
-    else:
+        # for p in processes:
+        #     p.join()
+    main(args)
+    # else:
         # for debugging
-        print('starting in debug mode')
-        args.distributed = True
-        init_processes(0, size, main, args)
+        # print('starting in debug mode')
+        # args.distributed = True
+        # init_processes(0, size, main, args)
+        # main(args)
