@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 from time import time
 
 from torch.multiprocessing import Process
-from torch.cuda.amp import autocast
 
 from model import AutoEncoder
 import utils
@@ -26,11 +25,10 @@ def set_bn(model, bn_eval_mode, num_samples=1, t=1.0, iter=100):
         model.eval()
     else:
         model.train()
-        with autocast():
-            for i in range(iter):
-                if i % 10 == 0:
-                    print('setting BN statistics iter %d out of %d' % (i+1, iter))
-                model.sample(num_samples, t)
+        for i in range(iter):
+            if i % 10 == 0:
+                print('setting BN statistics iter %d out of %d' % (i+1, iter))
+            model.sample(num_samples, t)
         model.eval()
 
 
@@ -109,8 +107,7 @@ def main(eval_args):
             for ind in range(num_iter):     # sampling is repeated.
                 torch.cuda.synchronize()
                 start = time()
-                with autocast():
-                    logits = model.sample(num_samples, eval_args.temp)
+                logits = model.sample(num_samples, eval_args.temp)
                 output = model.decoder_output(logits)
                 output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) \
                     else output.sample()

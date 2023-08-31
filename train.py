@@ -13,7 +13,6 @@ import os
 
 import torch.distributed as dist
 from torch.multiprocessing import Process
-from torch.cuda.amp import autocast, GradScaler
 
 from model import AutoEncoder
 from thirdparty.adamax import Adamax
@@ -59,7 +58,6 @@ def main(args):
 
     cnn_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         cnn_optimizer, float(args.epochs - args.warmup_epochs - 1), eta_min=args.learning_rate_min)
-    grad_scalar = GradScaler(2**10)
 
     num_output = utils.num_output(args.dataset)
     bpd_coeff = 1. / np.log(2.) / num_output
@@ -73,7 +71,6 @@ def main(args):
         model.load_state_dict(checkpoint['state_dict'])
         model = model.cuda()
         cnn_optimizer.load_state_dict(checkpoint['optimizer'])
-        grad_scalar.load_state_dict(checkpoint['grad_scalar'])
         cnn_scheduler.load_state_dict(checkpoint['scheduler'])
         global_step = checkpoint['global_step']
     else:
@@ -92,7 +89,7 @@ def main(args):
         logging.info('epoch %d', epoch)
 
         # Training.
-        train_nelbo, global_step = train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_iters, writer, logging)
+        train_nelbo, global_step = train(train_queue, model, cnn_optimizer, global_step, warmup_iters, writer, logging)
         logging.info('train_nelbo %f', train_nelbo)
         writer.add_scalar('train/nelbo', train_nelbo, global_step)
 
@@ -127,7 +124,7 @@ def main(args):
                 torch.save({'epoch': epoch + 1, 'state_dict': model.state_dict(),
                             'optimizer': cnn_optimizer.state_dict(), 'global_step': global_step,
                             'args': args, 'arch_instance': arch_instance, 'scheduler': cnn_scheduler.state_dict(),
-                            'grad_scalar': grad_scalar.state_dict()}, checkpoint_file)
+                           }, checkpoint_file)
 
     # Final validation
     valid_neg_log_p, valid_nelbo = test(valid_queue, model, num_samples=1000, args=args, logging=logging)
@@ -140,7 +137,7 @@ def main(args):
     writer.close()
 
 
-def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_iters, writer, logging):
+def train(train_queue, model, cnn_optimizer, global_step, warmup_iters, writer, logging):
     alpha_i = utils.kl_balancer_coeff(num_scales=model.num_latent_scales,
                                       groups_per_scale=model.groups_per_scale, fun='square')
     nelbo = utils.AvgrageMeter()
@@ -163,34 +160,32 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
             utils.average_params(model.parameters(), args.distributed)
 
         cnn_optimizer.zero_grad()
-        with autocast():
-            logits, log_q, log_p, kl_all, kl_diag = model(x)
+        logits, log_q, log_p, kl_all, kl_diag = model(x)
 
-            output = model.decoder_output(logits)
-            kl_coeff = utils.kl_coeff(global_step, args.kl_anneal_portion * args.num_total_iter,
-                                      args.kl_const_portion * args.num_total_iter, args.kl_const_coeff)
+        output = model.decoder_output(logits)
+        kl_coeff = utils.kl_coeff(global_step, args.kl_anneal_portion * args.num_total_iter,
+                                  args.kl_const_portion * args.num_total_iter, args.kl_const_coeff)
 
-            recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
-            balanced_kl, kl_coeffs, kl_vals = utils.kl_balancer(kl_all, kl_coeff, kl_balance=True, alpha_i=alpha_i)
+        recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
+        balanced_kl, kl_coeffs, kl_vals = utils.kl_balancer(kl_all, kl_coeff, kl_balance=True, alpha_i=alpha_i)
 
-            nelbo_batch = recon_loss + balanced_kl
-            loss = torch.mean(nelbo_batch)
-            norm_loss = model.spectral_norm_parallel()
-            bn_loss = model.batchnorm_loss()
-            # get spectral regularization coefficient (lambda)
-            if args.weight_decay_norm_anneal:
-                assert args.weight_decay_norm_init > 0 and args.weight_decay_norm > 0, 'init and final wdn should be positive.'
-                wdn_coeff = (1. - kl_coeff) * np.log(args.weight_decay_norm_init) + kl_coeff * np.log(args.weight_decay_norm)
-                wdn_coeff = np.exp(wdn_coeff)
-            else:
-                wdn_coeff = args.weight_decay_norm
+        nelbo_batch = recon_loss + balanced_kl
+        loss = torch.mean(nelbo_batch)
+        norm_loss = model.spectral_norm_parallel()
+        bn_loss = model.batchnorm_loss()
+        # get spectral regularization coefficient (lambda)
+        if args.weight_decay_norm_anneal:
+            assert args.weight_decay_norm_init > 0 and args.weight_decay_norm > 0, 'init and final wdn should be positive.'
+            wdn_coeff = (1. - kl_coeff) * np.log(args.weight_decay_norm_init) + kl_coeff * np.log(args.weight_decay_norm)
+            wdn_coeff = np.exp(wdn_coeff)
+        else:
+            wdn_coeff = args.weight_decay_norm
 
-            loss += norm_loss * wdn_coeff + bn_loss * wdn_coeff
+        loss += norm_loss * wdn_coeff + bn_loss * wdn_coeff
 
-        grad_scalar.scale(loss).backward()
+        loss.backward()
         utils.average_gradients(model.parameters(), args.distributed)
-        grad_scalar.step(cnn_optimizer)
-        grad_scalar.update()
+        cnn_optimizer.step()
         nelbo.update(loss.data, 1)
 
         if (global_step + 1) % 100 == 0:
