@@ -32,8 +32,8 @@ def main(args):
 
     # logging = utils.Logger(args.global_rank, args.save)
     # writer = utils.Writer(args.global_rank, args.save)
-    logging = utils.Logger('__main__.main', args.save)
-    writer = utils.Writer('__main__.main', args.save)
+    logging = utils.Logger(0, args.save)
+    writer = utils.Writer(0, args.save)
 
     # Get data loaders.
     train_queue, valid_queue, num_classes = datasets.get_loaders(args)
