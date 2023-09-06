@@ -121,12 +121,12 @@ def main(args):
 
         save_freq = int(np.ceil(args.epochs / 100))
         if epoch % save_freq == 0 or epoch == (args.epochs - 1):
-            if args.global_rank == 0:
-                logging.info('saving the model.')
-                torch.save({'epoch': epoch + 1, 'state_dict': model.state_dict(),
-                            'optimizer': cnn_optimizer.state_dict(), 'global_step': global_step,
-                            'args': args, 'arch_instance': arch_instance, 'scheduler': cnn_scheduler.state_dict(),
-                           }, checkpoint_file)
+            # if args.global_rank == 0:
+            logging.info('saving the model.')
+            torch.save({'epoch': epoch + 1, 'state_dict': model.state_dict(),
+                        'optimizer': cnn_optimizer.state_dict(), 'global_step': global_step,
+                        'args': args, 'arch_instance': arch_instance, 'scheduler': cnn_scheduler.state_dict(),
+                       }, checkpoint_file)
 
     # Final validation
     valid_neg_log_p, valid_nelbo = test(valid_queue, model, num_samples=1000, args=args, logging=logging)
