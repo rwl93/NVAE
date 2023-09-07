@@ -12,7 +12,7 @@ import numpy as np
 import os
 
 import torch.distributed as dist
-from torch.multiprocessing import Process
+# from torch.multiprocessing import Process
 
 from model import AutoEncoder
 from thirdparty.adamax import Adamax
@@ -30,14 +30,16 @@ def main(args):
     torch.cuda.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
 
-    logging = utils.Logger(args.global_rank, args.save)
-    writer = utils.Writer(args.global_rank, args.save)
+    # logging = utils.Logger(args.global_rank, args.save)
+    # writer = utils.Writer(args.global_rank, args.save)
+    logging = utils.Logger(0, args.save)
+    writer = utils.Writer(0, args.save)
 
     # Get data loaders.
     train_queue, valid_queue, num_classes = datasets.get_loaders(args)
     args.num_total_iter = len(train_queue) * args.epochs
     warmup_iters = len(train_queue) * args.warmup_epochs
-    swa_start = len(train_queue) * (args.epochs - 1)
+    # TODO: Remove? swa_start = len(train_queue) * (args.epochs - 1)
 
     arch_instance = utils.get_arch_cells(args.arch_instance)
 
@@ -78,9 +80,9 @@ def main(args):
 
     for epoch in range(init_epoch, args.epochs):
         # update lrs.
-        if args.distributed:
-            train_queue.sampler.set_epoch(global_step + args.seed)
-            valid_queue.sampler.set_epoch(0)
+        # if args.distributed:
+        #     train_queue.sampler.set_epoch(global_step + args.seed)
+        #     valid_queue.sampler.set_epoch(0)
 
         if epoch > args.warmup_epochs:
             cnn_scheduler.step()
@@ -119,12 +121,12 @@ def main(args):
 
         save_freq = int(np.ceil(args.epochs / 100))
         if epoch % save_freq == 0 or epoch == (args.epochs - 1):
-            if args.global_rank == 0:
-                logging.info('saving the model.')
-                torch.save({'epoch': epoch + 1, 'state_dict': model.state_dict(),
-                            'optimizer': cnn_optimizer.state_dict(), 'global_step': global_step,
-                            'args': args, 'arch_instance': arch_instance, 'scheduler': cnn_scheduler.state_dict(),
-                           }, checkpoint_file)
+            # if args.global_rank == 0:
+            logging.info('saving the model.')
+            torch.save({'epoch': epoch + 1, 'state_dict': model.state_dict(),
+                        'optimizer': cnn_optimizer.state_dict(), 'global_step': global_step,
+                        'args': args, 'arch_instance': arch_instance, 'scheduler': cnn_scheduler.state_dict(),
+                       }, checkpoint_file)
 
     # Final validation
     valid_neg_log_p, valid_nelbo = test(valid_queue, model, num_samples=1000, args=args, logging=logging)
@@ -156,8 +158,8 @@ def train(train_queue, model, cnn_optimizer, global_step, warmup_iters, writer, 
                 param_group['lr'] = lr
 
         # sync parameters, it may not be necessary
-        if step % 100 == 0:
-            utils.average_params(model.parameters(), args.distributed)
+        # if step % 100 == 0:
+        #     utils.average_params(model.parameters(), args.distributed)
 
         cnn_optimizer.zero_grad()
         logits, log_q, log_p, kl_all, kl_diag = model(x)
@@ -184,7 +186,7 @@ def train(train_queue, model, cnn_optimizer, global_step, warmup_iters, writer, 
         loss += norm_loss * wdn_coeff + bn_loss * wdn_coeff
 
         loss.backward()
-        utils.average_gradients(model.parameters(), args.distributed)
+        # utils.average_gradients(model.parameters(), args.distributed)
         cnn_optimizer.step()
         nelbo.update(loss.data, 1)
 
@@ -204,7 +206,7 @@ def train(train_queue, model, cnn_optimizer, global_step, warmup_iters, writer, 
             writer.add_scalar('train/bn_loss', bn_loss, global_step)
             writer.add_scalar('train/norm_coeff', wdn_coeff, global_step)
 
-            utils.average_tensor(nelbo.avg, args.distributed)
+            # utils.average_tensor(nelbo.avg, args.distributed)
             logging.info('train %d %f', global_step, nelbo.avg)
             writer.add_scalar('train/nelbo_avg', nelbo.avg, global_step)
             writer.add_scalar('train/lr', cnn_optimizer.state_dict()[
@@ -215,7 +217,7 @@ def train(train_queue, model, cnn_optimizer, global_step, warmup_iters, writer, 
             writer.add_scalar('kl_coeff/coeff', kl_coeff, global_step)
             total_active = 0
             for i, kl_diag_i in enumerate(kl_diag):
-                utils.average_tensor(kl_diag_i, args.distributed)
+                # utils.average_tensor(kl_diag_i, args.distributed)
                 num_active = torch.sum(kl_diag_i > 0.1).detach()
                 total_active += num_active
 
@@ -227,13 +229,13 @@ def train(train_queue, model, cnn_optimizer, global_step, warmup_iters, writer, 
 
         global_step += 1
 
-    utils.average_tensor(nelbo.avg, args.distributed)
+    # utils.average_tensor(nelbo.avg, args.distributed)
     return nelbo.avg, global_step
 
 
 def test(valid_queue, model, num_samples, args, logging):
-    if args.distributed:
-        dist.barrier()
+    # if args.distributed:
+    #     dist.barrier()
     nelbo_avg = utils.AvgrageMeter()
     neg_log_p_avg = utils.AvgrageMeter()
     model.eval()
@@ -261,11 +263,11 @@ def test(valid_queue, model, num_samples, args, logging):
         nelbo_avg.update(nelbo.data, x.size(0))
         neg_log_p_avg.update(- log_p.data, x.size(0))
 
-    utils.average_tensor(nelbo_avg.avg, args.distributed)
-    utils.average_tensor(neg_log_p_avg.avg, args.distributed)
-    if args.distributed:
+    # utils.average_tensor(nelbo_avg.avg, args.distributed)
+    # utils.average_tensor(neg_log_p_avg.avg, args.distributed)
+    # if args.distributed:
         # block to sync
-        dist.barrier()
+        # dist.barrier()
     logging.info('val, step: %d, NELBO: %f, neg Log p %f', step, nelbo_avg.avg, neg_log_p_avg.avg)
     return neg_log_p_avg.avg, nelbo_avg.avg
 
@@ -295,8 +297,8 @@ def test_vae_fid(model, args, total_fid_samples):
     m = torch.from_numpy(m).cuda()
     s = torch.from_numpy(s).cuda()
     # take average across gpus
-    utils.average_tensor(m, args.distributed)
-    utils.average_tensor(s, args.distributed)
+    # utils.average_tensor(m, args.distributed)
+    # utils.average_tensor(s, args.distributed)
 
     # convert m, s
     m = m.cpu().numpy()
@@ -310,18 +312,18 @@ def test_vae_fid(model, args, total_fid_samples):
     return fid
 
 
-def init_processes(rank, size, fn, args):
-    """ Initialize the distributed environment. """
-    os.environ['MASTER_ADDR'] = args.master_address
-    os.environ['MASTER_PORT'] = '6020'
-    torch.cuda.set_device(args.local_rank)
-    dist.init_process_group(backend='nccl', init_method='env://', rank=rank, world_size=size)
-    fn(args)
-    cleanup()
+# def init_processes(rank, size, fn, args):
+#     """ Initialize the distributed environment. """
+#     os.environ['MASTER_ADDR'] = args.master_address
+#     os.environ['MASTER_PORT'] = '6020'
+#     torch.cuda.set_device(args.local_rank)
+#     dist.init_process_group(backend='nccl', init_method='env://', rank=rank, world_size=size)
+#     fn(args)
+#     cleanup()
 
 
-def cleanup():
-    dist.destroy_process_group()
+# def cleanup():
+#     dist.destroy_process_group()
 
 
 if __name__ == '__main__':
@@ -414,45 +416,47 @@ if __name__ == '__main__':
     parser.add_argument('--cont_training', action='store_true', default=False,
                         help='This flag enables training from an existing checkpoint.')
     # DDP.
-    parser.add_argument('--num_proc_node', type=int, default=1,
-                        help='The number of nodes in multi node env.')
-    parser.add_argument('--node_rank', type=int, default=0,
-                        help='The index of node.')
-    parser.add_argument('--local_rank', type=int, default=0,
-                        help='rank of process in the node')
-    parser.add_argument('--global_rank', type=int, default=0,
-                        help='rank of process among all the processes')
-    parser.add_argument('--num_process_per_node', type=int, default=1,
-                        help='number of gpus')
-    parser.add_argument('--master_address', type=str, default='127.0.0.1',
-                        help='address for master')
+    # parser.add_argument('--num_proc_node', type=int, default=1,
+    #                     help='The number of nodes in multi node env.')
+    # parser.add_argument('--node_rank', type=int, default=0,
+    #                     help='The index of node.')
+    # parser.add_argument('--local_rank', type=int, default=0,
+    #                     help='rank of process in the node')
+    # parser.add_argument('--global_rank', type=int, default=0,
+    #                     help='rank of process among all the processes')
+    # parser.add_argument('--num_process_per_node', type=int, default=1,
+    #                     help='number of gpus')
+    # parser.add_argument('--master_address', type=str, default='127.0.0.1',
+    #                     help='address for master')
     parser.add_argument('--seed', type=int, default=1,
                         help='seed used for initialization')
     args = parser.parse_args()
     args.save = args.root + '/eval-' + args.save
     utils.create_exp_dir(args.save)
 
-    size = args.num_process_per_node
+    # size = args.num_process_per_node
 
-    if size > 1:
-        args.distributed = True
-        processes = []
-        for rank in range(size):
-            args.local_rank = rank
-            global_rank = rank + args.node_rank * args.num_process_per_node
-            global_size = args.num_proc_node * args.num_process_per_node
-            args.global_rank = global_rank
-            print('Node rank %d, local proc %d, global proc %d' % (args.node_rank, rank, global_rank))
-            p = Process(target=init_processes, args=(global_rank, global_size, main, args))
-            p.start()
-            processes.append(p)
+    # if size > 1:
+        # args.distributed = True
+        # processes = []
+        # for rank in range(size):
+        #     args.local_rank = rank
+        #     global_rank = rank + args.node_rank * args.num_process_per_node
+        #     global_size = args.num_proc_node * args.num_process_per_node
+        #     args.global_rank = global_rank
+        #     print('Node rank %d, local proc %d, global proc %d' % (args.node_rank, rank, global_rank))
+        #     p = Process(target=init_processes, args=(global_rank, global_size, main, args))
+        #     p.start()
+        #     processes.append(p)
 
-        for p in processes:
-            p.join()
-    else:
+        # for p in processes:
+        #     p.join()
+        # main(args)
+    # else:
         # for debugging
-        print('starting in debug mode')
-        args.distributed = True
-        init_processes(0, size, main, args)
+        # print('starting in debug mode')
+        # args.distributed = True
+        # init_processes(0, size, main, args)
+    main(args)
 
 

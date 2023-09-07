@@ -46,6 +46,6 @@ if __name__ == '__main__':
                         help='A dir to store fid related files')
 
     args = parser.parse_args()
-    args.distributed = False
+    # args.distributed = False
 
     main(args)

@@ -10,13 +10,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from thirdparty.swish import Swish as SwishFN
-from thirdparty.inplaced_sync_batchnorm import SyncBatchNormSwish
+# from thirdparty.inplaced_sync_batchnorm import SyncBatchNormSwish
 
-from utils import average_tensor
+# from utils import average_tensor
 from collections import OrderedDict
 
 BN_EPS = 1e-5
-SYNC_BN = True
+SYNC_BN = False  # True
 
 OPS = OrderedDict([
     ('res_elu', lambda Cin, Cout, stride: ELUConv(Cin, Cout, 3, stride, 1)),
@@ -58,6 +58,19 @@ class Swish(nn.Module):
 
     def forward(self, x):
         return act(x)
+
+
+class SyncBatchNormSwish(nn.Module):
+    def __init__(self, Cout, eps=BN_EPS, momentum=0.05):
+        super().__init__()
+        self.bn = nn.BatchNorm2d(Cout, eps=eps, momentum=momentum)
+        self.swish = Swish()
+
+    def forward(self, x):
+        x = self.bn(x)
+        x = self.swish(x)
+        return x
+
 
 @torch.jit.script
 def normalize_weight_jit(log_weight_norm, weight):
@@ -103,8 +116,8 @@ class Conv2D(nn.Conv2d):
                 st = 5 * torch.std(out, dim=[0, 2, 3])
 
                 # get mn and st from other GPUs
-                average_tensor(mn, is_distributed=True)
-                average_tensor(st, is_distributed=True)
+                # average_tensor(mn, is_distributed=True)
+                # average_tensor(st, is_distributed=True)
 
                 if self.bias is not None:
                     self.bias.data = - mn / (st + 1e-5)
